@@ -1,134 +1,91 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, Button } from 'react-native';
-import { Calendar } from 'react-native-calendars';
+import React from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Image, Button } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useAuth0 } from 'react-native-auth0';
+import { useDispatch, useSelector } from 'react-redux';
+import { setUser, clearUser } from '../redux/actions/authActions';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import appointmentData from './appdates.json';
+const LandingPage = () => {
 
-const AppointmentOptionsPopup = ({ visible, onClose, onCancel, onUploadFiles, position }) => {
-  return (
-    <Modal
-      animationType="fade"
-      transparent={true}
-      visible={visible}
-      onRequestClose={onClose}
-    >
-      <TouchableOpacity style={styles.popupBackground} onPress={onClose}>
-        <View style={[styles.popupContainer, position]}>
-          <TouchableOpacity onPress={onCancel}>
-            <Text style={styles.popupOption}>Cancel Appointment</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onUploadFiles}>
-            <Text style={styles.popupOption}>Upload Files</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={styles.popupCloseButton}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-};
+  const navigation = useNavigation();
+  const dispatch = useDispatch();
+  const { authorize, clearSession, getCredentials, error, isLoading, user } = useAuth0();
+  const loggedIn = useSelector(state => state.auth.isAuthenticated);
 
-const AppointmentButton = ({ onPress, isActive }) => (
-  <TouchableOpacity onPress={onPress} style={[styles.appointmentButton, { backgroundColor: isActive ? 'blue' : 'gray' }]}>
-    <Text style={styles.appointmentButtonText}>Join the Appointment</Text>
-  </TouchableOpacity>
-);
+  const onLogin = async (userType) => {
 
-const AppointmentsPage = () => {
-  const [appointmentsByDate, setAppointmentsByDate] = useState({});
-  const [popupVisible, setPopupVisible] = useState({});
-  const [selectedAppointment, setSelectedAppointment] = useState(null);
+    if (user) {
+      console.log('User is already logged in.');
+      navigation.navigate('AppNavigator');
+      return;
+    }
+    try {
+      console.log(`Attempting to log in as ${userType} user...`);
+      await authorize({}, {});
 
-  useEffect(() => {
-    const allSlots = appointmentData.patient.appointments;
-    const appointmentsGroupedByDate = {};
-    allSlots.forEach(appointment => {
-      const date = appointment.starts_at.split('T')[0];
-      if (appointmentsGroupedByDate[date]) {
-        appointmentsGroupedByDate[date].push(appointment);
-      } else {
-        appointmentsGroupedByDate[date] = [appointment];
+      console.log('Logged in successfully!');
+      const credentials = await getCredentials();
+      console.log(credentials);
+      const user_id = credentials?.user_id;
+      console.log('AccessToken:', credentials?.accessToken);
+      console.log('user_id: ', user_id);
+      //AsyncStorage.setItem('@user_info', JSON.stringify({ name: userType, ...credentials }));
+      AsyncStorage.setItem('isLoggedIn', JSON.stringify(true));
+      dispatch(setUser({ name: userType, ...credentials }));
+
+      if (userType === 'New') {
+        if (credentials){
+          navigation.navigate('NewPatientForm');
+        }
+        
+      } else if (userType === 'existing') {
+        if (credentials){
+          navigation.navigate('AppNavigator');
+        }
       }
-    });
-
-    // Sort appointments within each date group by start time
-    Object.keys(appointmentsGroupedByDate).forEach(date => {
-      appointmentsGroupedByDate[date].sort((a, b) => {
-        return new Date(a.starts_at) - new Date(b.starts_at);
-      });
-    });
-    
-    setAppointmentsByDate(appointmentsGroupedByDate);
-  }, []);
-
-  const handleCancel = () => {
-    setPopupVisible(false);
+    } catch (e) {
+      console.error('Login Error:', e);
+    }
   };
 
-  const handleUploadFiles = () => {
-    setPopupVisible(false);
+  const onLogout = async () => {
+    console.log('Logging out...');
+    try {
+      await AsyncStorage.removeItem('@user_info');
+      AsyncStorage.removeItem('isLoggedIn');
+      await clearSession({ federated: false }); // Ensure parameters match your Auth0 setup requirements
+      dispatch(clearUser());
+      console.log('Logged out successfully!');
+      navigation.navigate('LandingPage'); // Navigate to the landing page or another initial screen
+    } catch (e) {
+      console.error('Logout Error:', e);
+      // Optionally, update the UI to show an error message
+    }
   };
+  
 
-  const renderAppointmentItem = ({ item, index }) => {
-    const position = popupVisible[index] ? { top: popupVisible[index].y, left: popupVisible[index].x } : null;
-    const isCurrentAppointment = isAppointmentCurrent(item);
-
+  if (isLoading) {
     return (
-      <View style={styles.appointmentBox}>
-        <View style={styles.dateAndOptions}>
-          <Text style={styles.date}>{new Date(item.starts_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} - {new Date(item.ends_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</Text>
-          <TouchableOpacity
-            onPress={event => {
-              setSelectedAppointment(item);
-              setPopupVisible({ ...popupVisible, [index]: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } });
-            }}
-            style={styles.optionsButton}
-          >
-            <Text>...</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.practitionerInfo}>
-          <Text>{item.human_readable_UA}</Text>
-          <Text>{item.practitioner.name}</Text>
-          <Text>{item.practitioner.specialization}</Text>
-        </View>
-        <AppointmentButton onPress={() => {}} isActive={isCurrentAppointment} />
-        {popupVisible[index] && (
-          <AppointmentOptionsPopup
-            visible={true}
-            onClose={() => setPopupVisible({ ...popupVisible, [index]: null })}
-            onCancel={handleCancel}
-            onUploadFiles={handleUploadFiles}
-            position={position}
-          />
-        )}
+      <View style={styles.container}>
+        <Text>Loading...</Text>
       </View>
     );
-  };
-
-  const isAppointmentCurrent = (appointment) => {
-    const currentTime = new Date();
-    const appointmentStartTime = new Date(appointment.starts_at);
-    const appointmentEndTime = new Date(appointment.ends_at);
-    return currentTime >= appointmentStartTime && currentTime <= appointmentEndTime;
-  };
+  }
 
   return (
     <View style={styles.container}>
-      {Object.keys(appointmentsByDate).map(date => (
-        <View key={date}>
-          <Text style={styles.dateHeading}>
-            {new Date(date).toLocaleDateString('en-US', { weekday: 'long' })}, {new Date(date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </Text>
-          <FlatList
-            style={styles.appointmentsContainer}
-            data={appointmentsByDate[date]}
-            renderItem={renderAppointmentItem}
-            keyExtractor={(item, index) => `${index}`}
-          />
-        </View>
-      ))}
+      <TouchableOpacity style={styles.box} onPress={() => onLogin('New')}>
+        <Text style={styles.text}>New Patient</Text>
+        <Image source={require('../assets/arrow.png')} style={styles.image} />
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.box} onPress={() => onLogin('existing')}>
+        <Text style={styles.text}>Existing Patient</Text>
+        <Image source={require('../assets/arrow.png')} style={styles.image} />
+      </TouchableOpacity>
+
+      {error && <Text style={styles.error}></Text>}
     </View>
   );
 };
@@ -136,69 +93,37 @@ const AppointmentsPage = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 10,
-  },
-  dateHeading: {
-    fontSize: 18,
-    marginBottom: 10,
-    paddingHorizontal: 20,
-  },
-  appointmentsContainer: {
-    paddingHorizontal: 20,
-  },
-  appointmentBox: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    marginBottom: 10,
-    padding: 10,
-  },
-  dateAndOptions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 5,
-  },
-  date: {
-  },
-  optionsButton: {
-    padding: 5,
-  },
-  appointmentButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  appointmentButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  popupBackground: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#fff',
   },
-  popupContainer: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 10,
-    minWidth: 100,
-    position: 'absolute',
+  error: {
+    margin: 20,
+    textAlign: 'center',
+    color: '#D8000C',
   },
-  popupOption: {
-    fontSize: 16,
-    paddingVertical: 5,
+  box: {
+    borderWidth: 2,
+    borderColor: '#c8e1ff',
+    borderRadius: 10,
+    padding: 20,
+    marginVertical: 10,
+    backgroundColor: '#ffffff',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  popupCloseButton: {
-    fontSize: 16,
-    paddingVertical: 5,
-    color: 'blue',
-    marginTop: 5,
+  text: {
+    textAlign: 'center',
+    fontSize: 18,
+    flex: 1,
   },
-  practitionerInfo: {
-    marginBottom: 10, 
+  image: {
+    width: 30,
+    height: 30,
+    resizeMode: 'contain',
   },
 });
 
-export default AppointmentsPage;
+export default LandingPage;
